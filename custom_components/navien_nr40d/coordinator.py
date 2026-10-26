@@ -279,3 +279,6 @@ class NavienCoordinator(DataUpdateCoordinator[NavienData]):
         elif mode == "water":
             target = status.water_target if status else 50
             await self.async_set_water_temp(target)
+        elif mode == "away":
+            # Korean Smart 2.10.1 uses goout-on (mode 4), also exposed by the switch.
+            await self.async_set_away(True)

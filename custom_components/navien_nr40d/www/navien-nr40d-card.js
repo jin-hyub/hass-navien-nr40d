@@ -1,7 +1,44 @@
-const CARD_VERSION = "0.3.5";
+const CARD_VERSION = "0.3.6";
 const CARD_TYPE = "navien-nr40d-card";
 
 const STRINGS = {
+  ko: {
+    title: "나비엔",
+    room: "현재 실내 온도",
+    target: "실내 설정 온도",
+    on: "켜짐",
+    off: "꺼짐",
+    away: "외출",
+    mode_room: "실내난방",
+    mode_water: "온돌난방",
+    water: "온돌 설정 온도",
+    dhw: "온수 설정 온도",
+    heating: "난방 중",
+    idle: "대기 중",
+    offline: "조절기가 연결되어 있지 않습니다",
+    pick: "나비엔 NR-40D 기기를 선택해 주세요",
+    missing: "보일러 엔티티를 찾을 수 없습니다",
+    tip_link_on: "조절기가 연결되어 있습니다",
+    tip_link_off: "조절기와 연결되어 있지 않습니다",
+    tip_flame_on: "버너가 연소 중입니다",
+    tip_flame_off: "버너가 꺼져 있습니다",
+    tip_outdoor_on: "보일러에 외기 온도 센서가 연결되어 있습니다",
+    tip_outdoor_off: "연결된 외기 온도 센서가 없습니다",
+    tip_away_on: "외출 모드가 켜져 있습니다",
+    tip_error_ok: "오류가 없습니다",
+    tip_error: "보일러 오류",
+    tip_room: "조절기 센서에서 측정한 현재 실내 온도",
+    tip_target: "원하는 실내 온도입니다. 현재 온도가 설정 온도보다 낮으면 난방합니다",
+    tip_minus: "설정 온도 1°C 낮추기",
+    tip_plus: "설정 온도 1°C 높이기",
+    tip_off: "난방 끄기",
+    tip_on: "난방 켜기",
+    tip_away: "집을 비울 때 사용하는 외출 모드",
+    tip_mode_room: "실내 공기 온도를 기준으로 난방합니다",
+    tip_mode_water: "난방수 온도를 기준으로 난방합니다",
+    tip_water: "온돌난방에서 사용하는 난방수 설정 온도",
+    tip_dhw: "수도에서 사용하는 온수 설정 온도",
+  },
   en: {
     title: "Navien",
     room: "Room",
@@ -410,7 +447,7 @@ input[type=range]::-moz-range-track { background: transparent; }
 
 function lang(hass) {
   const code = (hass && (hass.locale?.language || hass.language) || "en").toLowerCase();
-  return code.startsWith("ru") ? "ru" : "en";
+  return code.startsWith("ko") ? "ko" : code.startsWith("ru") ? "ru" : "en";
 }
 
 function t(hass, key) {
@@ -874,7 +911,7 @@ if (!window.customCards.some((card) => card.type === CARD_TYPE)) {
   window.customCards.push({
     type: CARD_TYPE,
     name: "Navien NR-40D",
-    description: "Navien NR-40D boiler card",
+    description: "나비엔 NR-40D 보일러 카드",
     preview: false,
   });
 }

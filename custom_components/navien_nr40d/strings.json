@@ -57,7 +57,8 @@
         "name": "Heating mode",
         "state": {
           "room": "Room temperature",
-          "water": "Heating water"
+          "water": "Heating water",
+          "away": "Away"
         }
       }
     },

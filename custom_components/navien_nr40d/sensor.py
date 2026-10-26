@@ -13,7 +13,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN
+from .const import CURRENT_MODES, DOMAIN, ERROR_KEYS
 from .coordinator import NavienCoordinator
 from .entity import NavienEntity
 
@@ -52,6 +52,9 @@ class NavienRoomTempSensor(NavienEntity, SensorEntity):
 
 class NavienModeSensor(NavienEntity, SensorEntity):
     _attr_translation_key = "mode"
+    # Enum metadata lets HA translate states while preserving their raw keys.
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = list(CURRENT_MODES.values())
 
     def __init__(self, coordinator: NavienCoordinator) -> None:
         super().__init__(coordinator, "mode")
@@ -62,11 +65,16 @@ class NavienModeSensor(NavienEntity, SensorEntity):
 
     @property
     def native_value(self) -> str | None:
-        return None if self.status is None else self.status.current_mode
+        if self.status is None:
+            return None
+        mode = self.status.current_mode
+        return mode if mode in self._attr_options else None
 
 
 class NavienErrorSensor(NavienEntity, SensorEntity):
     _attr_translation_key = "error"
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = [*ERROR_KEYS.values(), "unknown"]
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(self, coordinator: NavienCoordinator) -> None:

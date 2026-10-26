@@ -7,7 +7,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, HEATING_MODE_ROOM, HEATING_MODE_WATER, HEATING_MODES
+from .const import DOMAIN, HEATING_MODES
 from .entity import NavienEntity
 
 
@@ -33,10 +33,8 @@ class NavienHeatingModeSelect(NavienEntity, SelectEntity):
         status = self.status
         if status is None:
             return None
-        if status.current_mode == HEATING_MODE_WATER:
-            return HEATING_MODE_WATER
-        if status.current_mode == HEATING_MODE_ROOM:
-            return HEATING_MODE_ROOM
+        if status.current_mode in HEATING_MODES:
+            return status.current_mode
         return None
 
     async def async_select_option(self, option: str) -> None:
