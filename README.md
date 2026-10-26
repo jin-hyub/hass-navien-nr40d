@@ -161,3 +161,5 @@ name: 거실 보일러
 - **연결 끊김(Unavailable) 지속 시**:
   - 공유기 방화벽의 Masquerade(Hairpin NAT) 규칙 누락 여부를 확인하십시오. 동일 L2/서브넷 내에서는 Hairpin NAT가 없으면 조절기가 TCP ACK 응답을 직접 수신하지 못해 세션이 성립되지 않습니다.
   - 조절기가 질의하는 정확한 포트와 도메인을 패킷 덤프(Wireshark/Router Torch) 또는 DNS 로그를 통해 재확인하십시오.
+ 
+https://github.com/ibuben/hass-navien-nr40d 가져와서 내용은 한글번역함.
