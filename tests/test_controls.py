@@ -4,7 +4,7 @@ import pathlib
 import sys
 import types
 import unittest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock, patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -96,6 +96,50 @@ class HeatingModeTests(unittest.IsolatedAsyncioTestCase):
         self.coordinator.data.status.error_key = 'unknown'
         self.assertIsNone(mode.native_value)
         self.assertIn(error.native_value, error._attr_options)
+
+
+class ConnectionTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.coordinator = object.__new__(coordinator_module.NavienCoordinator)
+        self.coordinator.entry = types.SimpleNamespace(data={}, options={})
+        self.coordinator._servers = []
+        self.coordinator._poll_task = None
+        self.coordinator._query_task = None
+        self.coordinator._writer = None
+        self.coordinator._gw = b'12345678'
+        self.coordinator._set_data = Mock()
+
+    async def test_send_failure_clears_connection_without_stopping_caller(self):
+        writer = Mock()
+        writer.drain = AsyncMock(side_effect=ConnectionResetError('reset'))
+        self.coordinator._writer = writer
+        await self.coordinator._send_raw(b'test')
+        self.assertIsNone(self.coordinator._writer)
+        self.assertIsNone(self.coordinator._gw)
+        self.coordinator._set_data.assert_called_once_with(connected=False, peer=None)
+        writer.close.assert_called_once()
+
+    async def test_old_send_failure_does_not_clear_replacement_connection(self):
+        old_writer, new_writer = Mock(), Mock()
+        async def replace_connection():
+            self.coordinator._writer = new_writer
+            raise ConnectionResetError('old connection')
+        old_writer.drain = replace_connection
+        self.coordinator._writer = old_writer
+        await self.coordinator._send_raw(b'test')
+        self.assertIs(self.coordinator._writer, new_writer)
+        self.coordinator._set_data.assert_not_called()
+
+    async def test_partial_listen_failure_closes_opened_ports(self):
+        server = Mock()
+        server.wait_closed = AsyncMock()
+        with patch.object(coordinator_module.asyncio, 'start_server',
+                          AsyncMock(side_effect=[server, OSError('port in use')])):
+            with self.assertRaises(OSError):
+                await self.coordinator.async_setup()
+        server.close.assert_called_once()
+        server.wait_closed.assert_awaited_once()
+        self.assertEqual(self.coordinator._servers, [])
 
 
 if __name__ == '__main__':

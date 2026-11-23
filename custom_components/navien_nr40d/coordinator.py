@@ -106,10 +106,14 @@ class NavienCoordinator(DataUpdateCoordinator[NavienData]):
 
     async def async_setup(self) -> None:
         host = self._host
-        for port in self._ports:
-            server = await asyncio.start_server(self._accept, host, port)
-            self._servers.append(server)
-            _LOGGER.info("Listening for NR-40D on %s:%s", host, port)
+        try:
+            for port in self._ports:
+                server = await asyncio.start_server(self._accept, host, port)
+                self._servers.append(server)
+                _LOGGER.info("Listening for NR-40D on %s:%s", host, port)
+        except (OSError, ValueError):
+            await self.async_shutdown()
+            raise
         self.async_set_updated_data(self.data)
         self._poll_task = self.entry.async_create_background_task(
             self.hass, self._poll_loop(), "navien-nr40d-poll"
@@ -134,6 +138,7 @@ class NavienCoordinator(DataUpdateCoordinator[NavienData]):
             server.close()
             await server.wait_closed()
         self._servers.clear()
+        self._set_data(connected=False, peer=None)
 
     async def _poll_loop(self) -> None:
         polls = 0
@@ -157,6 +162,7 @@ class NavienCoordinator(DataUpdateCoordinator[NavienData]):
         if self._writer:
             self._writer.close()
         self._writer = writer
+        self._gw = None
         self._set_data(connected=True, peer=peer_text)
         _LOGGER.info("NR-40D connected from %s", peer_text)
         parser = FrameParser()
@@ -165,8 +171,12 @@ class NavienCoordinator(DataUpdateCoordinator[NavienData]):
                 chunk = await reader.read(4096)
                 if not chunk:
                     break
+                if self._writer is not writer:
+                    break
                 frames, _junk = parser.feed(chunk)
                 for frame in frames:
+                    if self._writer is not writer:
+                        break
                     if not frame.crc_ok:
                         _LOGGER.warning("Dropped frame with bad CRC: %s", frame)
                         continue
@@ -180,6 +190,7 @@ class NavienCoordinator(DataUpdateCoordinator[NavienData]):
         finally:
             if self._writer is writer:
                 self._writer = None
+                self._gw = None
                 self._set_data(connected=False, peer=None)
             writer.close()
             try:
@@ -235,8 +246,17 @@ class NavienCoordinator(DataUpdateCoordinator[NavienData]):
         if writer is None:
             _LOGGER.debug("Controller is not connected, dropping %s", packet.hex())
             return
-        writer.write(packet)
-        await writer.drain()
+        try:
+            writer.write(packet)
+            await writer.drain()
+        except OSError as err:
+            _LOGGER.info("NR-40D send failed: %s", err)
+            if self._writer is writer:
+                self._writer = None
+                self._gw = None
+                self._set_data(connected=False, peer=None)
+            writer.close()
+            return
         _LOGGER.debug("TX %s", packet.hex(" "))
 
     async def async_query(self) -> None:
