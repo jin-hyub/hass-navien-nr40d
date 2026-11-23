@@ -141,6 +141,43 @@ class ConnectionTests(unittest.IsolatedAsyncioTestCase):
         server.wait_closed.assert_awaited_once()
         self.assertEqual(self.coordinator._servers, [])
 
+    async def test_empty_probe_does_not_replace_live_controller(self):
+        old_writer, probe = Mock(), Mock()
+        probe.get_extra_info.return_value = ('192.168.10.2', 1234)
+        probe.wait_closed = AsyncMock()
+        self.coordinator._writer = old_writer
+        reader = Mock(read=AsyncMock(return_value=b''))
+        await self.coordinator._accept(reader, probe)
+        self.assertIs(self.coordinator._writer, old_writer)
+        old_writer.close.assert_not_called()
+        self.coordinator._set_data.assert_not_called()
+
+    async def test_valid_controller_replaces_connection_and_reset_is_logged(self):
+        old_writer, new_writer = Mock(), Mock()
+        new_writer.get_extra_info.return_value = ('192.168.10.115', 1234)
+        new_writer.wait_closed = AsyncMock()
+        self.coordinator._writer = old_writer
+        self.coordinator._handle_frame = AsyncMock()
+        packet = protocol.Frame(3, 1, 1, b'12345678', 1).encode()
+        reader = Mock(read=AsyncMock(side_effect=[packet, ConnectionResetError('peer reset')]))
+        with self.assertLogs(coordinator_module._LOGGER, level='INFO') as logs:
+            await self.coordinator._accept(reader, new_writer)
+        old_writer.close.assert_called_once()
+        self.coordinator._handle_frame.assert_awaited_once()
+        self.assertIsNone(self.coordinator._writer)
+        self.assertTrue(any('last_rx_cmd=0x01' in line and 'ConnectionResetError' in line
+                            for line in logs.output))
+
+    async def test_delayed_registration_request_does_not_cross_sessions(self):
+        old_writer = Mock()
+        self.coordinator._writer = Mock()
+        self.coordinator._send = AsyncMock()
+        await self.coordinator._registered_query(old_writer, coordinator_module.CMD_QUERY)
+        self.coordinator._send.assert_not_awaited()
+        await self.coordinator._registered_query(self.coordinator._writer,
+                                                 coordinator_module.CMD_QUERY)
+        self.coordinator._send.assert_awaited_once_with(coordinator_module.CMD_QUERY, b'\x00')
+
 
 if __name__ == '__main__':
     unittest.main()

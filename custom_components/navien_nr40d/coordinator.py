@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -159,33 +160,61 @@ class NavienCoordinator(DataUpdateCoordinator[NavienData]):
     ) -> None:
         peer = writer.get_extra_info("peername")
         peer_text = f"{peer[0]}:{peer[1]}" if peer else "unknown"
-        if self._writer:
-            self._writer.close()
-        self._writer = writer
-        self._gw = None
-        self._set_data(connected=True, peer=peer_text)
-        _LOGGER.info("NR-40D connected from %s", peer_text)
         parser = FrameParser()
+        accepted = False
+        started = time.monotonic()
+        last_rx: float | None = None
+        last_cmd: int | None = None
+        reason = "peer EOF"
+        _LOGGER.info("NR-40D TCP candidate from %s", peer_text)
         try:
             while True:
-                chunk = await reader.read(4096)
+                if accepted:
+                    chunk = await reader.read(4096)
+                else:
+                    # A port probe must not evict a working controller connection.
+                    remaining = 15 - (time.monotonic() - started)
+                    if remaining <= 0:
+                        raise TimeoutError("no valid controller frame within 15 seconds")
+                    chunk = await asyncio.wait_for(reader.read(4096), remaining)
                 if not chunk:
                     break
-                if self._writer is not writer:
+                if accepted and self._writer is not writer:
+                    reason = "replaced by another validated connection"
                     break
                 frames, _junk = parser.feed(chunk)
                 for frame in frames:
-                    if self._writer is not writer:
+                    if accepted and self._writer is not writer:
                         break
                     if not frame.crc_ok:
                         _LOGGER.warning("Dropped frame with bad CRC: %s", frame)
                         continue
+                    if frame.src != DST_REMOTE or frame.dst not in (SRC_SERVER, SRC_APP):
+                        _LOGGER.debug("Ignoring non-controller frame: %s", frame)
+                        continue
+                    if not accepted:
+                        if self._gw is not None and frame.gw != self._gw:
+                            reason = "gateway mismatch"
+                            return
+                        old_writer = self._writer
+                        self._writer = writer
+                        accepted = True
+                        if old_writer:
+                            _LOGGER.info("NR-40D replacing connection %s with %s",
+                                         old_writer.get_extra_info("peername"), peer_text)
+                            old_writer.close()
+                        self._set_data(connected=True, peer=peer_text)
+                        _LOGGER.info("NR-40D connected from %s (validated)", peer_text)
+                    last_rx = time.monotonic()
+                    last_cmd = frame.cmd
                     self._gw = frame.gw
                     self._proto = frame.proto
                     await self._handle_frame(frame)
         except asyncio.CancelledError:
+            reason = "task cancelled"
             raise
         except Exception as err:  # noqa: BLE001
+            reason = f"{type(err).__name__}: {err}"
             _LOGGER.info("NR-40D connection from %s closed: %s", peer_text, err)
         finally:
             if self._writer is writer:
@@ -197,7 +226,13 @@ class NavienCoordinator(DataUpdateCoordinator[NavienData]):
                 await writer.wait_closed()
             except Exception:  # noqa: BLE001
                 pass
-            _LOGGER.info("NR-40D disconnected (%s)", peer_text)
+            _LOGGER.info(
+                "NR-40D disconnected (%s): reason=%s validated=%s duration=%.1fs "
+                "last_rx_age=%s last_rx_cmd=%s",
+                peer_text, reason, accepted, time.monotonic() - started,
+                None if last_rx is None else round(time.monotonic() - last_rx, 1),
+                None if last_cmd is None else f"0x{last_cmd:02x}",
+            )
 
     async def _handle_frame(self, frame: Frame) -> None:
         _LOGGER.debug("RX %s", frame)
@@ -212,16 +247,22 @@ class NavienCoordinator(DataUpdateCoordinator[NavienData]):
             await self._send((frame.cmd + 0x64) & 0xFF, b"\x01", SRC_SERVER)
 
         if frame.cmd == CMD_REGISTER:
+            writer = self._writer
             self.hass.loop.call_later(
-                2, lambda: self.hass.async_create_task(self.async_query())
+                2, lambda: self.hass.async_create_task(self._registered_query(writer, CMD_QUERY))
             )
             self.hass.loop.call_later(
-                5, lambda: self.hass.async_create_task(self._send(CMD_DEVICE_INFO))
+                5, lambda: self.hass.async_create_task(self._registered_query(writer, CMD_DEVICE_INFO))
             )
         elif frame.cmd == CMD_DEVICE_INFO_REPLY:
             self._set_data(device=decode_device(frame.data), gateway_id=frame.gw.hex())
         elif frame.cmd == CMD_STATUS_REPLY and frame.data[:1] == b"\x01":
             self._set_data(status=decode_status(frame.data), gateway_id=frame.gw.hex())
+
+    async def _registered_query(self, writer: asyncio.StreamWriter | None, cmd: int) -> None:
+        """Do not send an old session's delayed requests to a replacement session."""
+        if writer is not None and self._writer is writer:
+            await self._send(cmd, b"\x00" if cmd == CMD_QUERY else b"")
 
     def _set_data(self, **changes: Any) -> None:
         current = self.data
